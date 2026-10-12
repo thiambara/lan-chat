@@ -13,8 +13,8 @@ const Call = (() => {
   let iceServers = null;
 
   const channelWith = peer => '@' + [state.me, peer].sort().join('|');
-  const signal = (to, kind, callId, enc = null) =>
-    api('/api/call', { method: 'POST', body: JSON.stringify({ to, kind, callId, deviceId, enc }) });
+  const signal = (to, kind, callId, enc = null, on = false) =>
+    api('/api/call', { method: 'POST', body: JSON.stringify({ to, kind, callId, deviceId, enc, on }) });
   async function getIce() {
     if (!iceServers) iceServers = (await api('/api/ice')).iceServers;
     return iceServers;
@@ -44,9 +44,15 @@ const Call = (() => {
   async function makePc(c) {
     const pc = new RTCPeerConnection({ iceServers: await getIce() });
     pc.ontrack = e => {
-      c.remoteAudio.srcObject = e.streams[0];
+      if (e.track.kind === 'video') { // voie du partage d'écran (affichée seulement quand l'autre partage)
+        c.remoteVideo = e.track;
+        if (c.peerSharing) Screen.show(c.peer, e.track);
+        return;
+      }
+      const stream = e.streams[0] || new MediaStream([e.track]);
+      c.remoteAudio.srcObject = stream;
       c.remoteAudio.play().catch(() => {});
-      watchLevel(c, e.streams[0]);
+      watchLevel(c, stream);
     };
     pc.onconnectionstatechange = () => {
       if (call !== c) return;
@@ -89,6 +95,7 @@ const Call = (() => {
       if (call !== c) return c.stream.getTracks().forEach(t => t.stop());
       c.pc = await makePc(c);
       c.stream.getTracks().forEach(t => c.pc.addTrack(t, c.stream));
+      c.videoTx = c.pc.addTransceiver('video', { direction: 'sendrecv' }); // réservée au partage d'écran
       await c.pc.setLocalDescription(await c.pc.createOffer());
       await waitIce(c.pc);
       if (call !== c) return;
@@ -118,6 +125,8 @@ const Call = (() => {
       c.pc = await makePc(c);
       c.stream.getTracks().forEach(t => c.pc.addTrack(t, c.stream));
       await c.pc.setRemoteDescription(await decSdp(c.peer, c.offerEnc, c.id));
+      c.videoTx = c.pc.getTransceivers().find(t => t.receiver.track?.kind === 'video');
+      if (c.videoTx) c.videoTx.direction = 'sendrecv';
       await c.pc.setLocalDescription(await c.pc.createAnswer());
       await waitIce(c.pc);
       if (call !== c) return;
@@ -142,6 +151,29 @@ const Call = (() => {
     signal(c.peer, 'hangup', c.id).catch(() => {});
     end('ended');
   }
+  // ---------- Partage d'écran ----------
+  async function toggleScreen() {
+    const c = call;
+    if (!c?.videoTx || c.state !== 'active') return;
+    if (c.screenTrack) return stopScreen(c);
+    let track;
+    try { track = await Screen.capture(); } catch { return; } // choix annulé
+    if (call !== c) return track.stop();
+    c.screenTrack = track;
+    track.onended = () => stopScreen(c); // bouton « Arrêter le partage » du navigateur
+    await Screen.applyTo(c.videoTx.sender, track, 1500000);
+    signal(c.peer, 'screen', c.id, null, true).catch(() => {});
+    render();
+  }
+  function stopScreen(c) {
+    if (!c.screenTrack) return;
+    c.screenTrack.onended = null;
+    c.screenTrack.stop();
+    c.screenTrack = null;
+    c.videoTx?.sender.replaceTrack(null).catch(() => {});
+    if (call === c) { signal(c.peer, 'screen', c.id, null, false).catch(() => {}); render(); }
+  }
+
   function toggleMute() {
     const c = call;
     if (!c?.stream) return;
@@ -196,6 +228,12 @@ const Call = (() => {
       case 'hangup':
         if (mine) end('ended');
         break;
+      case 'screen':
+        if (!mine) return;
+        call.peerSharing = d.on;
+        if (d.on && call.remoteVideo) Screen.show(d.from, call.remoteVideo); else Screen.hide(d.from);
+        render();
+        break;
     }
   }
 
@@ -218,6 +256,8 @@ const Call = (() => {
     call = null;
     Tones.stop();
     if (!c) return render();
+    if (c.screenTrack) { c.screenTrack.onended = null; c.screenTrack.stop(); }
+    Screen.hide(c.peer);
     clearTimeout(c.timeout);
     clearTimeout(c.dropTimer);
     clearInterval(c.levelTimer);
@@ -326,19 +366,21 @@ const Call = (() => {
     }
     const status = {
       calling: 'Sonnerie…', ringing: 'Sonnerie…', connecting: 'Connexion…', reconnecting: 'Reconnexion…',
-      active: fmtDur(Date.now() - (c.startedAt || Date.now())),
+      active: fmtDur(Date.now() - (c.startedAt || Date.now())) + (c.screenTrack ? ' · tu partages ton écran' : c.peerSharing ? ' · écran partagé' : ''),
     }[c.state];
+    const canShare = Screen.supported() && c.videoTx && c.state === 'active';
     ui.className = 'call-bar' + (c.state === 'active' ? ' active' : '');
     ui.innerHTML = `${avatar}
       <div class="call-info"><div class="call-name">${esc(c.peer)}</div><div class="call-status">${status}</div></div>
+      ${canShare ? `<button class="call-btn small${c.screenTrack ? ' sharing' : ''}" data-call="screen" title="${c.screenTrack ? 'Arrêter le partage d\'écran' : 'Partager mon écran'}">${icon('screen')}</button>` : ''}
       <button class="call-btn small${c.muted ? ' muted' : ''}" data-call="mute" title="${c.muted ? 'Réactiver le micro' : 'Couper le micro'}" ${c.stream ? '' : 'disabled'}>${icon(c.muted ? 'mic-off' : 'mic')}</button>
       <button class="call-btn small decline" data-call="hangup" title="Raccrocher">${icon('phone-off')}</button>`;
-    if (c.state === 'active') clock = setInterval(() => { const s = ui.querySelector('.call-status'); if (s && call === c) s.textContent = fmtDur(Date.now() - c.startedAt); }, 1000);
+    if (c.state === 'active') clock = setInterval(() => { const s = ui.querySelector('.call-status'); if (s && call === c) s.textContent = fmtDur(Date.now() - c.startedAt) + (c.screenTrack ? ' · tu partages ton écran' : c.peerSharing ? ' · écran partagé' : ''); }, 1000);
   }
   ui.addEventListener('click', e => {
     const b = e.target.closest('[data-call]');
     if (!b) return;
-    ({ accept, decline, hangup, mute: toggleMute })[b.dataset.call]?.();
+    ({ accept, decline, hangup, mute: toggleMute, screen: toggleScreen })[b.dataset.call]?.();
   });
 
   return { start, onSignal, active: () => !!call };

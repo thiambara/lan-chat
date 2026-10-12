@@ -133,7 +133,7 @@ function roomOut(ch) {
   const r = rooms.get(ch);
   if (!r) return null;
   return { id: r.id, channel: ch, startedBy: r.startedBy, startedAt: r.startedAt,
-    members: [...r.members].map(([user, m]) => ({ user, deviceId: m.deviceId, joinedAt: m.joinedAt })) };
+    members: [...r.members].map(([user, m]) => ({ user, deviceId: m.deviceId, joinedAt: m.joinedAt, sharing: !!m.sharing })) };
 }
 function leaveRoom(ch, user, deviceId) {
   const r = rooms.get(ch);
@@ -464,11 +464,11 @@ async function handle(req, res) {
     const to = String(body.to || '');
     const kind = String(body.kind || '');
     const callId = String(body.callId || '');
-    const KINDS = ['offer', 'answer', 'decline', 'cancel', 'hangup', 'busy'];
+    const KINDS = ['offer', 'answer', 'decline', 'cancel', 'hangup', 'busy', 'screen'];
     if (!users[to] || to === me || !KINDS.includes(kind) || !/^[\w-]{8,64}$/.test(callId)) return json(res, 400, { error: 'Signal d\'appel invalide' });
     if (body.enc && !validEnc(body.enc)) return json(res, 400, { error: 'Signal d\'appel invalide' });
     const online = [...clients].some(c => c.user === to);
-    const signal = { from: me, to, kind, callId, deviceId: String(body.deviceId || '').slice(0, 64), enc: body.enc || null };
+    const signal = { from: me, to, kind, callId, deviceId: String(body.deviceId || '').slice(0, 64), enc: body.enc || null, on: !!body.on };
     for (const c of clients) {
       if (c.user === to || (c.user === me && (kind === 'answer' || kind === 'decline'))) send(c, 'call', signal);
     }
@@ -476,7 +476,7 @@ async function handle(req, res) {
   }
 
   // ----- Appels de groupe -----
-  const huddle = p.match(/^\/api\/huddle\/(join|leave|signal)$/);
+  const huddle = p.match(/^\/api\/huddle\/(join|leave|signal|screen)$/);
   if (huddle && req.method === 'POST') {
     const body = await readJson(req);
     const ch = String(body.channel || '');
@@ -494,6 +494,13 @@ async function handle(req, res) {
     }
     if (huddle[1] === 'leave') {
       leaveRoom(ch, me, deviceId);
+      return json(res, 200, { room: roomOut(ch) });
+    }
+    if (huddle[1] === 'screen') {
+      const m = rooms.get(ch)?.members.get(me);
+      if (!m || m.deviceId !== deviceId) return json(res, 409, { error: 'Tu n\'es pas dans cet appel' });
+      m.sharing = !!body.on;
+      broadcast('huddle', { channel: ch, room: roomOut(ch) }, ch);
       return json(res, 200, { room: roomOut(ch) });
     }
     // Signal (offre/réponse SDP chiffrée) vers un participant précis

@@ -39,9 +39,11 @@ const Huddle = (() => {
     peer.pc = new RTCPeerConnection({ iceServers: await getIce() });
     h.stream.getTracks().forEach(t => peer.pc.addTrack(t, h.stream));
     peer.pc.ontrack = e => {
-      peer.audio.srcObject = e.streams[0];
+      if (e.track.kind === 'video') { peer.videoTrack = e.track; syncScreens(); return; } // voie du partage d'écran
+      const stream = e.streams[0] || new MediaStream([e.track]);
+      peer.audio.srcObject = stream;
       peer.audio.play().catch(() => {});
-      watchLevel(peer, e.streams[0]);
+      watchLevel(peer, stream);
     };
     peer.pc.onconnectionstatechange = () => {
       if (peer.pc.connectionState === 'failed' && h?.peers.get(user) === peer) {
@@ -61,9 +63,12 @@ const Huddle = (() => {
     try { peer.pc.close(); } catch {}
     peer.audio.srcObject = null;
     h.peers.delete(user);
+    Screen.hide(user);
   }
   async function offerTo(user, deviceId) {
     const peer = await makePeer(user, deviceId);
+    peer.videoTx = peer.pc.addTransceiver('video', { direction: 'sendrecv' }); // réservée au partage d'écran
+    if (h.screenTrack) Screen.applyTo(peer.videoTx.sender, h.screenTrack, screenBitrate()).catch(() => {});
     await peer.pc.setLocalDescription(await peer.pc.createOffer());
     await waitIce(peer.pc);
     if (h?.peers.get(user) !== peer) return;
@@ -109,11 +114,47 @@ const Huddle = (() => {
   function teardown() {
     if (!h) return;
     for (const user of [...h.peers.keys()]) closePeer(user);
+    if (h.screenTrack) { h.screenTrack.onended = null; h.screenTrack.stop(); }
+    Screen.clear();
     h.stream?.getTracks().forEach(t => t.stop());
     h = null;
     render();
     renderChannelUi();
   }
+  // ---------- Partage d'écran ----------
+  // En maillage, le partageur envoie son écran à chacun : débit plus bas quand le groupe grandit.
+  const screenBitrate = () => (h && h.peers.size >= 3 ? 600000 : 1200000);
+  async function toggleScreen() {
+    if (!h || h.joining) return;
+    if (h.screenTrack) return stopScreen();
+    let track;
+    try { track = await Screen.capture(); } catch { return; } // choix annulé
+    if (!h) return track.stop();
+    h.screenTrack = track;
+    track.onended = stopScreen; // bouton « Arrêter le partage » du navigateur
+    for (const peer of h.peers.values()) if (peer.videoTx) Screen.applyTo(peer.videoTx.sender, track, screenBitrate()).catch(() => {});
+    post('screen', { channel: h.channel, on: true }).catch(() => {});
+    render();
+  }
+  function stopScreen() {
+    if (!h?.screenTrack) return;
+    h.screenTrack.onended = null;
+    h.screenTrack.stop();
+    h.screenTrack = null;
+    for (const peer of h.peers.values()) peer.videoTx?.sender.replaceTrack(null).catch(() => {});
+    post('screen', { channel: h.channel, on: false }).catch(() => {});
+    render();
+  }
+  // Affiche les écrans des participants qui partagent (état tenu par le serveur dans la salle)
+  function syncScreens() {
+    if (!h) return;
+    const room = rooms[h.channel];
+    for (const [user, peer] of h.peers) {
+      const sharing = room?.members.some(m => m.user === user && m.deviceId === peer.deviceId && m.sharing);
+      if (sharing && peer.videoTrack) Screen.show(user, peer.videoTrack); else Screen.hide(user);
+    }
+  }
+
   function toggleMute() {
     if (!h?.stream) return;
     h.muted = !h.muted;
@@ -160,6 +201,7 @@ const Huddle = (() => {
         if (present.get(user) !== peer.deviceId) { closePeer(user); blip(false); }
       }
       for (const m of room.members) if (m.user !== me() && !h.peers.has(m.user) && before && !inRoom(before, m.user)) blip(true);
+      syncScreens();
       render();
     }
     renderChannelUi();
@@ -171,6 +213,11 @@ const Huddle = (() => {
       if (d.kind === 'offer') {
         const peer = await makePeer(d.from, d.fromDevice);
         await peer.pc.setRemoteDescription(desc);
+        peer.videoTx = peer.pc.getTransceivers().find(t => t.receiver.track?.kind === 'video');
+        if (peer.videoTx) {
+          peer.videoTx.direction = 'sendrecv';
+          if (h.screenTrack) Screen.applyTo(peer.videoTx.sender, h.screenTrack, screenBitrate()).catch(() => {});
+        }
         await peer.pc.setLocalDescription(await peer.pc.createAnswer());
         await waitIce(peer.pc);
         if (h?.peers.get(d.from) !== peer) return;
@@ -231,17 +278,19 @@ const Huddle = (() => {
       return `<span class="hu-av${cls}" style="background:${colorOf(u)}" title="${esc(u)}${u === me() ? ' (toi)' : ''}">${initial(u)}</span>`;
     }).join('');
     const status = h.joining ? 'Connexion…' : fmtDur(Date.now() - (h.startedAt || Date.now()));
+    const canShare = Screen.supported() && !h.joining;
     ui.className = 'call-bar huddle-bar active';
     ui.innerHTML = `<div class="hu-icon">🔊</div>
       <div class="call-info"><div class="call-name">#${esc(h.channel)}</div><div class="call-status">${status} · ${people.length} participant${people.length > 1 ? 's' : ''}</div></div>
       <div class="hu-avs">${avatars}</div>
+      ${canShare ? `<button class="call-btn small${h.screenTrack ? ' sharing' : ''}" data-huddle="screen" title="${h.screenTrack ? 'Arrêter le partage d\'écran' : 'Partager mon écran'}">${icon('screen')}</button>` : ''}
       <button class="call-btn small${h.muted ? ' muted' : ''}" data-huddle="mute" title="${h.muted ? 'Réactiver le micro' : 'Couper le micro'}">${icon(h.muted ? 'mic-off' : 'mic')}</button>
       <button class="call-btn small decline" data-huddle="leave" title="Quitter l'appel">${icon('phone-off')}</button>`;
     if (!h.joining) clock = setInterval(() => { const s = ui.querySelector('.call-status'); if (s && h) s.textContent = `${fmtDur(Date.now() - h.startedAt)} · ${people.length} participant${people.length > 1 ? 's' : ''}`; }, 1000);
   }
   ui.addEventListener('click', e => {
     const b = e.target.closest('[data-huddle]');
-    if (b) ({ mute: toggleMute, leave })[b.dataset.huddle]?.();
+    if (b) ({ mute: toggleMute, leave, screen: toggleScreen })[b.dataset.huddle]?.();
   });
 
   // Bandeau « appel en cours » en haut du canal affiché, et marque 🔊 dans la barre latérale

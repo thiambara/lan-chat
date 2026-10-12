@@ -65,6 +65,8 @@ Bouton 📞 en haut d'une conversation privée : appel en tête-à-tête, sonner
 
 **Appels de groupe** : bouton 📞 en haut d'un canal. Le premier démarre l'appel, les autres voient « 🔊 Appel en cours · Rejoindre » (bandeau, barre latérale, notification) et entrent ou sortent librement, sans sonnerie. Jusqu'à 8 personnes : chaque participant est relié directement à chacun des autres (maillage WebRTC), le serveur ne fait que tenir la liste et relayer les signaux, chiffrés avec la clé du canal.
 
+**Partage d'écran** (appels en tête-à-tête et de groupe, depuis un ordinateur) : bouton 🖥 dans la barre d'appel. Les autres le voient dans un panneau (plein écran, réduction en vignette, choix si plusieurs personnes partagent) ; quelqu'un qui rejoint un appel de groupe en cours de partage le voit tout de suite. Chaque connexion réserve dès le départ une voie vidéo : partager ou arrêter est instantané, sans renégociation. Le débit est plafonné (1,2 à 1,5 Mbit/s, 600 kbit/s à partir de 4 personnes, car le partageur envoie l'écran à chacun). Sur mobile, on peut voir un écran partagé, pas partager le sien.
+
 - Le son va directement d'un navigateur à l'autre (WebRTC), chiffré (DTLS-SRTP). Le serveur ne fait que la mise en relation, et les descriptions de session qu'il relaie sont chiffrées avec la clé de la conversation : il ne peut pas s'intercaler.
 - Par défaut, un serveur STUN public aide les navigateurs à se trouver (`LANCHAT_STUN`, vide pour le désactiver). Ça suffit au bureau et sur la plupart des box/4G.
 - Réseaux très fermés : relais **TURN** (coturn). Le serveur remet à chaque client des identifiants temporaires (12 h) signés par un secret partagé avec coturn (`LANCHAT_TURN_URLS`, `LANCHAT_TURN_SECRET`).
