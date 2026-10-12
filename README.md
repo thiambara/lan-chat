@@ -63,6 +63,8 @@ POSTGRES_PASSWORD=change-moi docker compose up --build
 
 Bouton 📞 en haut d'une conversation privée : appel en tête-à-tête, sonnerie, couper le micro, raccrocher ; la trace (« Appel audio · 3 min », « Appel manqué ») reste dans la conversation.
 
+**Appels de groupe** : bouton 📞 en haut d'un canal. Le premier démarre l'appel, les autres voient « 🔊 Appel en cours · Rejoindre » (bandeau, barre latérale, notification) et entrent ou sortent librement, sans sonnerie. Jusqu'à 8 personnes : chaque participant est relié directement à chacun des autres (maillage WebRTC), le serveur ne fait que tenir la liste et relayer les signaux, chiffrés avec la clé du canal.
+
 - Le son va directement d'un navigateur à l'autre (WebRTC), chiffré (DTLS-SRTP). Le serveur ne fait que la mise en relation, et les descriptions de session qu'il relaie sont chiffrées avec la clé de la conversation : il ne peut pas s'intercaler.
 - Par défaut, un serveur STUN public aide les navigateurs à se trouver (`LANCHAT_STUN`, vide pour le désactiver). Ça suffit au bureau et sur la plupart des box/4G.
 - Réseaux très fermés : relais **TURN** (coturn). Le serveur remet à chaque client des identifiants temporaires (12 h) signés par un secret partagé avec coturn (`LANCHAT_TURN_URLS`, `LANCHAT_TURN_SECRET`).

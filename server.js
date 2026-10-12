@@ -122,8 +122,27 @@ const participants = parentId => {
   return [...new Set([p && p.user, ...(replies.get(parentId) || []).map(r => r.user)].filter(Boolean))];
 };
 
-// clients SSE : Set<{ res, user }>
+// clients SSE : Set<{ res, user, deviceId }>
 const clients = new Set();
+
+// Appels de groupe (« huddles ») : une salle par canal, en mémoire. Chaque participant est identifié par
+// son pseudo et l'identifiant de son onglet (deviceId) ; un onglet qui se déconnecte quitte la salle.
+const HUDDLE_MAX = 8;
+const rooms = new Map(); // canal -> { id, startedBy, startedAt, members: Map(user -> { deviceId, joinedAt }) }
+function roomOut(ch) {
+  const r = rooms.get(ch);
+  if (!r) return null;
+  return { id: r.id, channel: ch, startedBy: r.startedBy, startedAt: r.startedAt,
+    members: [...r.members].map(([user, m]) => ({ user, deviceId: m.deviceId, joinedAt: m.joinedAt })) };
+}
+function leaveRoom(ch, user, deviceId) {
+  const r = rooms.get(ch);
+  if (!r || r.members.get(user)?.deviceId !== deviceId) return false;
+  r.members.delete(user);
+  if (!r.members.size) rooms.delete(ch);
+  broadcast('huddle', { channel: ch, room: roomOut(ch) }, ch);
+  return true;
+}
 const onlineUsers = () => [...new Set([...clients].map(c => c.user))].sort((a, b) => a.localeCompare(b));
 
 // Un DM s'appelle "@alice|bob" (noms triés).
@@ -271,15 +290,16 @@ async function handle(req, res) {
     // X-Accel-Buffering : empêche un éventuel proxy de retenir le flux temps réel
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 2000\n\n');
-    const client = { res, user: me };
+    const client = { res, user: me, deviceId: String(url.searchParams.get('device') || '').slice(0, 64) };
     const wasOnline = onlineUsers().includes(me);
     clients.add(client);
-    send(client, 'hello', { channels, online: onlineUsers(), me });
+    send(client, 'hello', { channels, online: onlineUsers(), me, rooms: [...rooms.keys()].map(roomOut) });
     if (!wasOnline) broadcast('presence', { online: onlineUsers() });
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     req.on('close', () => {
       clearInterval(ping);
       clients.delete(client);
+      for (const ch of [...rooms.keys()]) leaveRoom(ch, me, client.deviceId);
       if (!onlineUsers().includes(me)) broadcast('presence', { online: onlineUsers() });
     });
     return;
@@ -453,6 +473,39 @@ async function handle(req, res) {
       if (c.user === to || (c.user === me && (kind === 'answer' || kind === 'decline'))) send(c, 'call', signal);
     }
     return json(res, 200, { delivered: online });
+  }
+
+  // ----- Appels de groupe -----
+  const huddle = p.match(/^\/api\/huddle\/(join|leave|signal)$/);
+  if (huddle && req.method === 'POST') {
+    const body = await readJson(req);
+    const ch = String(body.channel || '');
+    const deviceId = String(body.deviceId || '').slice(0, 64);
+    if (!channels.includes(ch) || !deviceId) return json(res, 400, { error: 'Appel de groupe invalide' });
+    if (![...clients].some(c => c.user === me && c.deviceId === deviceId)) return json(res, 400, { error: 'Onglet non connecté au flux temps réel' });
+
+    if (huddle[1] === 'join') {
+      let r = rooms.get(ch);
+      if (!r) rooms.set(ch, r = { id: crypto.randomUUID(), startedBy: me, startedAt: Date.now(), members: new Map() });
+      if (!r.members.has(me) && r.members.size >= HUDDLE_MAX) return json(res, 409, { error: `Appel complet (${HUDDLE_MAX} personnes maximum)` });
+      r.members.set(me, { deviceId, joinedAt: Date.now() }); // rejoindre depuis un autre onglet remplace l'ancien
+      broadcast('huddle', { channel: ch, room: roomOut(ch) }, ch);
+      return json(res, 200, { room: roomOut(ch) });
+    }
+    if (huddle[1] === 'leave') {
+      leaveRoom(ch, me, deviceId);
+      return json(res, 200, { room: roomOut(ch) });
+    }
+    // Signal (offre/réponse SDP chiffrée) vers un participant précis
+    const r = rooms.get(ch);
+    const to = String(body.to || ''), toDevice = String(body.toDevice || '');
+    const kind = String(body.kind || '');
+    if (!r || r.members.get(me)?.deviceId !== deviceId || r.members.get(to)?.deviceId !== toDevice) return json(res, 409, { error: 'Participant absent de l\'appel' });
+    if (!['offer', 'answer'].includes(kind) || !validEnc(body.enc)) return json(res, 400, { error: 'Signal invalide' });
+    for (const c of clients) {
+      if (c.user === to && c.deviceId === toDevice) send(c, 'huddle-signal', { channel: ch, roomId: r.id, from: me, fromDevice: deviceId, kind, enc: body.enc });
+    }
+    return json(res, 200, { ok: true });
   }
 
   // Indicateur « est en train d'écrire »

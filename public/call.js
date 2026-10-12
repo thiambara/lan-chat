@@ -77,7 +77,7 @@ const Call = (() => {
 
   // ---------- Appeler ----------
   async function start(peer) {
-    if (call) return toast('Un appel est déjà en cours');
+    if (call || Huddle.active()) return toast('Un appel est déjà en cours');
     if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) return toast('Les appels ne sont pas pris en charge par ce navigateur.');
     if (!state.users.has(peer)) return toast(`${peer} n'a pas de compte`);
     if (!state.online.includes(peer)) return toast(`${peer} est hors ligne : impossible de l'appeler pour l'instant.`);
@@ -164,7 +164,7 @@ const Call = (() => {
     const mine = call && call.id === d.callId && call.peer === d.from;
     switch (d.kind) {
       case 'offer':
-        if (call) return signal(d.from, 'busy', d.callId).catch(() => {});
+        if (call || Huddle.active()) return signal(d.from, 'busy', d.callId).catch(() => {});
         call = { id: d.callId, peer: d.from, role: 'callee', state: 'ringing', offerEnc: d.enc, remoteAudio: new Audio() };
         Tones.ring();
         render();

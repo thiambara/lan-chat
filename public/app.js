@@ -23,6 +23,10 @@ const state = {
   sound: store.get('lanchat:sound') !== 'off',
 };
 let es;
+// Identifiant de cet onglet : sert aux appels (plusieurs onglets d'un même compte) et au nettoyage côté serveur.
+const DEVICE_ID = crypto.randomUUID();
+const hasHuddle = ch => typeof Huddle !== 'undefined' && Huddle.hasRoom(ch);
+const refreshHuddleUi = () => { if (typeof Huddle !== 'undefined') Huddle.renderChannelUi(); };
 
 // ---------- Utilitaires ----------
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -402,6 +406,11 @@ function threadSumHtml(m) {
 const fmtCallDur = ms => { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')}`; };
 function callHtml(m) {
   const c = m.call, mine = m.user === state.me;
+  if (c.kind === 'group') {
+    const live = c.status === 'started' && hasHuddle(m.channel) && !Huddle.isIn(m.channel);
+    const text = c.status === 'started' ? `${mine ? 'Tu as' : 'a'} démarré un appel de groupe` : `Appel de groupe terminé · ${fmtCallDur(c.duration || 0)}`;
+    return `<div class="call-log group">🔊<span>${esc(text)}</span>${live ? `<button class="btn-sm" data-huddle-join="${esc(m.channel)}">Rejoindre</button>` : ''}</div>`;
+  }
   const label = {
     ended: `Appel audio · ${fmtCallDur(c.duration || 0)}`,
     missed: mine ? 'Appel sans réponse' : 'Appel manqué',
@@ -484,7 +493,7 @@ function renderSidebar() {
 
   const chList = $('#channelList');
   chList.innerHTML = '';
-  for (const ch of state.channels) chList.appendChild(sideItem(ch, `<span class="hash">#</span><span class="name">${esc(ch)}</span>`));
+  for (const ch of state.channels) chList.appendChild(sideItem(ch, `<span class="hash">#</span><span class="name">${esc(ch)}</span>${hasHuddle(ch) ? '<span class="hu-mark" title="Appel en cours">🔊</span>' : ''}`));
   const dmList = $('#dmList');
   dmList.innerHTML = '';
   dmList.appendChild(sideItem(dmId(state.me), `${avatarHtml(state.me)}<span class="name">${esc(state.me)} <span class="self-tag">(toi)</span></span>`));
@@ -511,7 +520,10 @@ function setTopbar(iconHtml, title, sub, avatarOf) {
   $('#subtitle').textContent = sub;
 }
 function renderTopbar() {
-  $('#callBtn').hidden = !(state.view === 'channel' && isDm(state.current) && !isSelf(state.current));
+  const cb = $('#callBtn');
+  cb.hidden = !(state.view === 'channel' && !isSelf(state.current));
+  cb.title = isDm(state.current) ? 'Appel audio' : hasHuddle(state.current) ? 'Rejoindre l\'appel du canal' : 'Démarrer un appel de groupe';
+  cb.classList.toggle('live', !isDm(state.current) && hasHuddle(state.current));
   if (state.view !== 'channel') return;
   const ch = state.current;
   if (isSelf(ch)) {
@@ -609,6 +621,7 @@ function setView(view) {
   $('#callBtn').hidden = true;
   $('#mainComposer').hidden = view !== 'channel';
   if (view !== 'channel') $('#keyWait').hidden = true;
+  refreshHuddleUi();
   $('#app').classList.remove('open');
 }
 async function openChannel(ch) {
@@ -620,6 +633,7 @@ async function openChannel(ch) {
   if (isDm(ch)) state.dms.add(ch);
   const stored = store.get('lanchat:read:' + ch);
   state.readMark = stored === null ? Infinity : Number(stored);
+  refreshHuddleUi();
   mainComposer.setPlaceholder(isSelf(ch) ? 'Note pour toi-même…' : `Message ${isDm(ch) ? 'à ' + dmOther(ch) : '#' + ch}`);
   renderSidebar();
   renderTyping();
@@ -1303,7 +1317,7 @@ function replaceIn(list, m) {
 }
 function connect() {
   es?.close();
-  es = new EventSource(`/api/events?${qs({ token: state.token })}`);
+  es = new EventSource(`/api/events?${qs({ token: state.token, device: DEVICE_ID })}`);
   es.onopen = () => $('#offline').hidden = true;
   es.onerror = () => {
     $('#offline').hidden = false;
@@ -1315,6 +1329,7 @@ function connect() {
   const on = (name, fn) => es.addEventListener(name, e => { queue = queue.then(() => fn(JSON.parse(e.data))).catch(err => console.error(err)); });
   on('hello', async d => {
     state.channels = d.channels; state.online = d.online;
+    Huddle.setRooms(d.rooms);
     await loadUsers();
     await loadKeys();
     scheduleShare();
@@ -1329,6 +1344,8 @@ function connect() {
   });
   on('presence', d => { state.online = d.online; renderSidebar(); });
   on('call', d => Call.onSignal(d));
+  on('huddle', d => Huddle.onRoom(d));
+  on('huddle-signal', d => Huddle.onSignal(d));
   on('channels', d => { state.channels = d.channels; renderSidebar(); });
   on('user', u => { state.users.set(u.name, u.pub); state.known.add(u.name); renderSidebar(); scheduleShare(); });
   on('keys', async ({ channel, holders }) => {
@@ -1406,7 +1423,7 @@ function notify(m, inThread) {
   if (!(inThread || isDm(m.channel) || isMentioned(m) || document.hidden)) return;
   ping();
   const where = inThread ? `a répondu dans un fil · ${label(m.channel)}` : label(m.channel);
-  const body = m.text ? m.text.slice(0, 140) : m.call ? (m.call.status === 'ended' ? '📞 Appel audio terminé' : '📞 Appel manqué') : m.file ? (m.file.voice ? '🎤 Message vocal' : '📎 ' + (m.file.name || 'fichier')) : '🔒 Message chiffré';
+  const body = m.text ? m.text.slice(0, 140) : m.call ? (m.call.kind === 'group' ? (m.call.status === 'started' ? '🔊 Appel de groupe démarré' : '🔊 Appel de groupe terminé') : m.call.status === 'ended' ? '📞 Appel audio terminé' : '📞 Appel manqué') : m.file ? (m.file.voice ? '🎤 Message vocal' : '📎 ' + (m.file.name || 'fichier')) : '🔒 Message chiffré';
   const open = () => { if (inThread) { openChannel(m.channel); openThread(m.parent, m.id); } else openChannel(m.channel); };
   if (!document.hidden && (inThread || isDm(m.channel) || isMentioned(m))) toast(`${m.user} ${inThread ? 'a répondu dans un fil' : '· ' + label(m.channel)} : ${body.slice(0, 60)}`, open);
   if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
@@ -1429,7 +1446,7 @@ $('#channelForm').onsubmit = async e => {
   } catch (err) { toast(err.message); }
 };
 $('#menu').onclick = () => $('#app').classList.toggle('open');
-$('#callBtn').onclick = () => Call.start(dmOther(state.current));
+$('#callBtn').onclick = () => (isDm(state.current) ? Call.start(dmOther(state.current)) : Huddle.join(state.current));
 $('#backdrop').onclick = () => $('#app').classList.remove('open');
 $('#wsHost').innerHTML = `${icon('bubble', 'width:12px;height:12px')}${esc(location.host)}`;
 $('#invite').onclick = () => copy(location.origin);

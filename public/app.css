@@ -451,7 +451,7 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px 
 .call-note { margin-top: 20px; font-size: 12px; color: var(--faint); }
 
 /* Appel en cours : barre flottante qui suit la navigation */
-#callUi.call-bar { position: fixed; right: 20px; bottom: 96px; z-index: 40; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 10px; background: var(--elev); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); min-width: 280px; animation: pop .2s ease-out; }
+#callUi.call-bar { position: fixed; right: 20px; top: 72px; z-index: 40; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 10px; background: var(--elev); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); min-width: 280px; animation: pop .2s ease-out; }
 #callUi.call-bar.active { border-color: var(--online); }
 .call-info { flex: 1; min-width: 0; }
 .call-bar .call-name { font-weight: 700; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -462,4 +462,31 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px 
 .call-log { display: inline-flex; align-items: center; gap: 10px; margin-top: 2px; padding: 8px 10px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--elev); font-size: 14px; font-weight: 600; }
 .call-log .ic { width: 17px; height: 17px; color: var(--online); }
 .call-log.missed .ic { color: var(--danger); }
-@media (max-width: 760px) { #callUi.call-bar { left: 10px; right: 10px; bottom: 84px; min-width: 0; } }
+@media (max-width: 760px) { #callUi.call-bar { left: 10px; right: 10px; top: 66px; min-width: 0; } }
+
+/* ===== Appels de groupe ===== */
+.call-top.live { color: #fff; background: var(--online); border-radius: 8px; animation: callpulse 1.8s ease-out infinite; }
+.call-top.live:hover { background: var(--online); filter: brightness(1.08); }
+.hu-mark { font-size: 12px; margin-left: auto; }
+.huddle-banner { display: flex; align-items: center; gap: 10px; padding: 8px 20px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--online) 10%, var(--bg)); font-size: 13.5px; flex: none; }
+.hb-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--online); animation: recpulse 1.4s ease-in-out infinite; flex: none; }
+.hb-text { white-space: nowrap; }
+.hb-avs, .hu-avs { display: flex; flex: 1; min-width: 0; }
+.hu-avs { flex: none; }
+.hu-av { width: 26px; height: 26px; border-radius: 50%; color: #fff; display: inline-grid; place-items: center; font-size: 11.5px; font-weight: 700; margin-right: -6px; border: 2px solid var(--bg); flex: none; transition: box-shadow .15s, opacity .15s; }
+.hu-avs .hu-av { width: 30px; height: 30px; border-color: var(--elev); margin-right: -4px; }
+.hu-av.speaking { box-shadow: 0 0 0 2px var(--online); z-index: 1; }
+.hu-av.muted { opacity: .5; }
+.hu-av.pending { opacity: .45; }
+.hb-in { color: var(--online); font-weight: 600; white-space: nowrap; }
+.hb-join { background: var(--online); color: #fff; border-color: transparent; }
+.hb-join:hover { background: var(--online); filter: brightness(1.08); }
+.hu-icon { font-size: 20px; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--bg-soft); flex: none; }
+#huddleUi.call-bar { position: fixed; right: 20px; top: 112px; z-index: 40; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 10px; background: var(--elev); border: 1px solid var(--online); border-radius: 18px; box-shadow: var(--shadow-lg); animation: pop .2s ease-out; max-width: calc(100vw - 40px); }
+#huddleUi .call-status { color: var(--online); }
+.call-log.group { font-size: 14px; }
+@media (max-width: 760px) {
+  #huddleUi.call-bar { left: 10px; right: 10px; top: 106px; }
+  #huddleUi .hu-avs { display: none; }
+  .huddle-banner { padding: 8px 12px; }
+}
