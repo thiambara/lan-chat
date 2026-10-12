@@ -65,12 +65,16 @@ const E2E = (() => {
   }
 
   // ----- Clés partagées (ECDH + HKDF) -----
-  const pubCache = new Map(), sharedCache = new Map();
+  // Le cache des clés partagées est rangé par clé privée : deux identités ne partagent jamais une entrée.
+  const pubCache = new Map();
+  let sharedCaches = new WeakMap(); // clé privée -> Map("pub|info" -> Promise<CryptoKey>)
   function importPub(pubB64) {
     if (!pubCache.has(pubB64)) pubCache.set(pubB64, subtle.importKey('raw', unb64(pubB64), CURVE, false, []));
     return pubCache.get(pubB64);
   }
   function sharedKey(priv, theirPubB64, info) {
+    if (!sharedCaches.has(priv)) sharedCaches.set(priv, new Map());
+    const sharedCache = sharedCaches.get(priv);
     const k = theirPubB64 + '|' + info;
     if (!sharedCache.has(k)) {
       sharedCache.set(k, (async () => {
@@ -130,7 +134,7 @@ const E2E = (() => {
   const saveSession = s => idb('readwrite', st => st.put(s, 'session'));
   const loadSession = () => idb('readonly', st => st.get('session')).catch(() => null);
   const clearSession = () => idb('readwrite', st => st.delete('session')).catch(() => {});
-  function reset() { pubCache.clear(); sharedCache.clear(); }
+  function reset() { pubCache.clear(); sharedCaches = new WeakMap(); }
 
   return {
     available, randomB64, deriveFromPassword, createIdentity, openIdentity,

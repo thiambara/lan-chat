@@ -44,7 +44,9 @@ const fmtSize = n => n < 1024 ? n + ' o' : n < 1048576 ? (n / 1024).toFixed(1) +
 const dmId = other => '@' + [state.me, other].sort().join('|');
 const dmOther = ch => ch.slice(1).split('|').find(n => n !== state.me) || state.me;
 const isDm = ch => ch.startsWith('@');
-const label = ch => isDm(ch) ? dmOther(ch) : '#' + ch;
+// Conversation avec soi-même (« Notes à moi-même ») : le DM "@moi|moi"
+const isSelf = ch => isDm(ch) && dmOther(ch) === state.me;
+const label = ch => isSelf(ch) ? `${state.me} (toi)` : isDm(ch) ? dmOther(ch) : '#' + ch;
 const isMentioned = m => m.user !== state.me && new RegExp(`(^|\\s)@(${reEsc(state.me)}|tous|here|channel)(?![\\w.\\-À-ÿ])`, 'i').test(m.text || '');
 const qs = obj => new URLSearchParams(obj).toString();
 const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
@@ -434,6 +436,7 @@ function refreshMsg(m) {
 function people() {
   const set = new Set([...state.online, ...state.users.keys()].filter(u => u !== state.me));
   for (const ch of state.dms) set.add(dmOther(ch));
+  set.delete(state.me); // l'espace perso a sa propre entrée, en tête de liste
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 function renderSidebar() {
@@ -451,8 +454,9 @@ function renderSidebar() {
   for (const ch of state.channels) chList.appendChild(sideItem(ch, `<span class="hash">#</span><span class="name">${esc(ch)}</span>`));
   const dmList = $('#dmList');
   dmList.innerHTML = '';
+  dmList.appendChild(sideItem(dmId(state.me), `${avatarHtml(state.me)}<span class="name">${esc(state.me)} <span class="self-tag">(toi)</span></span>`));
   for (const u of people()) dmList.appendChild(sideItem(dmId(u), `${avatarHtml(u, state.online.includes(u))}<span class="name">${esc(u)}</span>`));
-  if (!dmList.children.length) dmList.innerHTML = '<div class="item hint">Personne d\'autre en ligne. Partage le lien avec 🔗 en haut !</div>';
+  if (dmList.children.length === 1) dmList.insertAdjacentHTML('beforeend', '<div class="item hint">Personne d\'autre pour l\'instant. Partage le lien avec 🔗 en haut !</div>');
   const total = Object.values(state.unread).reduce((a, b) => a + b, 0) + n;
   document.title = (total ? `(${total}) ` : '') + 'LAN Chat';
   renderTopbar();
@@ -476,7 +480,9 @@ function setTopbar(iconHtml, title, sub, avatarOf) {
 function renderTopbar() {
   if (state.view !== 'channel') return;
   const ch = state.current;
-  if (isDm(ch)) {
+  if (isSelf(ch)) {
+    setTopbar(initial(state.me), `${state.me} (toi)`, 'Ton espace personnel · 🔒 Chiffré de bout en bout', state.me);
+  } else if (isDm(ch)) {
     const u = dmOther(ch), on = state.online.includes(u);
     setTopbar(`${initial(u)}<span class="pres ${on ? 'on' : ''}"></span>`, u, `${on ? 'En ligne' : 'Hors ligne'} · 🔒 Chiffré de bout en bout`, u);
   } else {
@@ -486,7 +492,11 @@ function renderTopbar() {
 function introEl() {
   const ch = state.current, el = document.createElement('div');
   el.className = 'intro';
-  if (isDm(ch)) {
+  if (isSelf(ch)) {
+    el.innerHTML = `<div class="big av" style="background:${colorOf(state.me)}">${initial(state.me)}</div>
+      <h3>Ton espace perso</h3>
+      <p>Garde ici tes notes, liens, bouts de code et fichiers à avoir sous la main. Tout est chiffré avec ta propre clé : <b>personne d'autre ne peut le lire</b>, et tu le retrouves depuis n'importe quel poste en te connectant.</p>`;
+  } else if (isDm(ch)) {
     const u = dmOther(ch);
     el.innerHTML = `<div class="big av" style="background:${colorOf(u)}">${initial(u)}</div>
       <h3>${esc(u)}</h3><p>Début de ta conversation privée avec <b>${esc(u)}</b>, chiffrée de bout en bout : seuls vous deux pouvez la lire.</p>
@@ -575,7 +585,7 @@ async function openChannel(ch) {
   if (isDm(ch)) state.dms.add(ch);
   const stored = store.get('lanchat:read:' + ch);
   state.readMark = stored === null ? Infinity : Number(stored);
-  mainComposer.setPlaceholder(`Message ${isDm(ch) ? 'à ' + dmOther(ch) : '#' + ch}`);
+  mainComposer.setPlaceholder(isSelf(ch) ? 'Note pour toi-même…' : `Message ${isDm(ch) ? 'à ' + dmOther(ch) : '#' + ch}`);
   renderSidebar();
   renderTyping();
   if (!isDm(ch)) await ensureChannelKey(ch).catch(() => {});
@@ -730,6 +740,7 @@ function renderSwitcher() {
   const all = [
     { ch: '__threads', name: 'fils de discussion', html: `${icon('thread', 'width:22px')}<span>Fils de discussion</span>` },
     ...state.channels.map(c => ({ ch: c, name: c, html: `<span class="hash">#</span><span>${esc(c)}</span>` })),
+    { ch: dmId(state.me), name: `${state.me} toi moi notes perso`, html: `${avatarHtml(state.me)}<span>${esc(state.me)} (toi) — notes perso</span>` },
     ...people().map(u => ({ ch: dmId(u), name: u, html: `${avatarHtml(u, state.online.includes(u))}<span>${esc(u)}</span>` })),
   ];
   swItems = all.filter(i => i.name.toLowerCase().includes(q));

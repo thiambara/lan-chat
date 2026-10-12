@@ -392,3 +392,5 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px 
 .intro .safety .ic { width: 16px; height: 16px; color: var(--online); margin-top: 2px; }
 .intro .safety code { font: 600 13px var(--mono); color: var(--text); letter-spacing: .04em; }
 @media (max-width: 760px) { .keywait { margin: 0 10px 8px; } }
+
+.self-tag { opacity: .6; font-weight: 400; }
