@@ -394,3 +394,31 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px 
 @media (max-width: 760px) { .keywait { margin: 0 10px 8px; } }
 
 .self-tag { opacity: .6; font-weight: 400; }
+
+/* ===== Messages vocaux ===== */
+.composer.recording textarea, .composer.recording .tools { display: none; }
+.rec { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 6px; }
+.rec .icon-btn { color: var(--muted); }
+.rec .icon-btn:hover { color: var(--danger); background: var(--bg-hover); }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: recpulse 1.2s ease-in-out infinite; flex: none; }
+@keyframes recpulse { 50% { opacity: .35; transform: scale(.8); } }
+.rec-time { font: 600 13px var(--mono); color: var(--text); min-width: 38px; font-variant-numeric: tabular-nums; }
+.rec-bars { flex: 1; height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; min-width: 0; }
+.rec-bars i { width: 3px; border-radius: 2px; background: var(--accent); flex: none; transition: height .1s; }
+
+.voice { --p: 0%; display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 8px 12px 8px 8px; border: 1px solid var(--border); border-radius: 22px; background: var(--elev); width: min(380px, 100%); }
+.voice-play { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; display: grid; place-items: center; flex: none; }
+.voice-play:hover { background: var(--accent-hover); }
+.voice-play .ic { width: 15px; height: 15px; }
+.voice-wave { position: relative; flex: 1; height: 30px; cursor: pointer; min-width: 0; }
+.vw { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; }
+.vw i { flex: 1; min-width: 2px; border-radius: 2px; background: var(--border-strong); }
+.vw-fill { clip-path: inset(0 calc(100% - var(--p)) 0 0); }
+.vw-fill i { background: var(--accent); }
+.voice-time { font: 600 12px var(--mono); color: var(--muted); min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.voice-speed { border: 1px solid var(--border); background: var(--bg-soft); color: var(--muted); border-radius: 10px; font-size: 11.5px; font-weight: 700; padding: 1px 7px; flex: none; }
+.voice-speed:hover { color: var(--text); }
+.voice-dl { color: var(--faint); display: grid; place-items: center; }
+.voice-dl:hover { color: var(--text); }
+.voice-dl .ic { width: 15px; height: 15px; }
+.voice audio { display: none; }

@@ -40,6 +40,7 @@ const fmtDay = ts => {
   return s[0].toUpperCase() + s.slice(1);
 };
 const fmtWhen = ts => sameDay(ts, Date.now()) ? `à ${fmtTime(ts)}` : sameDay(ts, Date.now() - 864e5) ? `hier à ${fmtTime(ts)}` : `le ${new Date(ts).toLocaleDateString('fr-FR')}`;
+const fmtDur = ms => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 const fmtSize = n => n < 1024 ? n + ' o' : n < 1048576 ? (n / 1024).toFixed(1) + ' Ko' : (n / 1048576).toFixed(1) + ' Mo';
 const dmId = other => '@' + [state.me, other].sort().join('|');
 const dmOther = ch => ch.slice(1).split('|').find(n => n !== state.me) || state.me;
@@ -154,7 +155,7 @@ async function decryptMsg(m) {
   return m;
 }
 const decryptAll = list => Promise.all(list.map(decryptMsg));
-const fileMeta = f => ({ name: f.name, type: f.type, size: f.size, iv: f.iv });
+const fileMeta = f => ({ name: f.name, type: f.type, size: f.size, iv: f.iv, ...(f.voice ? { voice: f.voice } : {}) });
 function updateKeyWait() {
   const ch = state.current, el = $('#keyWait');
   let msg = '';
@@ -351,6 +352,7 @@ function renderFile(f) {
     <span class="tile" style="background:${color}">${esc(ext.slice(0, 4) || 'file')}</span>
     <span class="finfo"><span class="fname">${esc(name)}</span><small>${fmtSize(f.size)}${f.e2e ? ' · 🔒 chiffré' : ''}</small></span>
     <span class="dl">${icon('download')}</span></a>`;
+  if (f.e2e && f.voice) return voiceHtml(f);
   if (f.e2e) {
     const preview = isImg ? `<div class="preview"><img data-encfile="${f.id}" alt="${esc(name)}" data-zoom></div>` :
       isVideo ? `<div class="preview"><video data-encfile="${f.id}" controls preload="metadata"></video></div>` : '';
@@ -361,6 +363,20 @@ function renderFile(f) {
   const preview = isImg ? `<div class="preview"><img src="${url}" alt="${esc(name)}" loading="lazy" data-zoom></div>` :
     isVideo ? `<div class="preview"><video src="${url}" controls preload="metadata"></video></div>` : '';
   return preview + card(`href="${url}&dl=1" download="${esc(name)}"`);
+}
+// Message vocal : lecture, forme d'onde (cliquable pour se déplacer), vitesse. L'audio chiffré est
+// déchiffré dès l'affichage (MutationObserver sur [data-encfile]).
+function voiceHtml(f) {
+  const peaks = f.voice.peaks?.length ? f.voice.peaks : Array(40).fill(30);
+  const bars = peaks.map(p => `<i style="height:${Math.max(12, Math.min(100, p))}%"></i>`).join('');
+  return `<div class="voice" data-duration="${Number(f.voice.duration) || 0}">
+    <button class="voice-play" data-voice="play" title="Lire">${icon('play')}</button>
+    <div class="voice-wave" data-voice="seek"><div class="vw vw-base">${bars}</div><div class="vw vw-fill">${bars}</div></div>
+    <span class="voice-time">${fmtDur(f.voice.duration)}</span>
+    <button class="voice-speed" data-voice="speed" title="Vitesse de lecture">1×</button>
+    <a class="voice-dl" href="#" data-download title="Télécharger">${icon('download')}</a>
+    <audio data-encfile="${f.id}" preload="auto"></audio>
+  </div>`;
 }
 function avatarHtml(name, online) {
   return `<span class="av" style="background:${colorOf(name)}" title="${esc(name)}">${initial(name)}${online === undefined ? '' : `<span class="pres ${online ? 'on' : ''}"></span>`}</span>`;
@@ -883,7 +899,7 @@ async function deleteMsg(m) {
 
 // Actions sur les messages (délégation sur toute la page)
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-copy],[data-zoom],[data-act],[data-quick],[data-download],.react[data-emoji]');
+  const t = e.target.closest('[data-copy],[data-zoom],[data-act],[data-quick],[data-download],[data-voice],.react[data-emoji]');
   if (!t || !t.closest('.msg')) return;
   if (t.dataset.copy !== undefined) return copy(codeStore[t.dataset.copy], t);
   if (t.dataset.zoom !== undefined) {
@@ -892,6 +908,7 @@ document.addEventListener('click', async e => {
   }
   const el = t.closest('.msg'), m = el._msg;
   if (t.dataset.download !== undefined) { e.preventDefault(); return downloadFile(m); }
+  if (t.dataset.voice) return voiceAction(t, m, e);
   if (t.dataset.quick) return react(m, t.dataset.quick);
   if (t.dataset.emoji) { t.classList.add('bump'); return react(m, t.dataset.emoji); }
   switch (t.dataset.act) {
@@ -903,6 +920,57 @@ document.addEventListener('click', async e => {
     case 'delete': return deleteMsg(m);
   }
 });
+
+// ---------- Lecteur des messages vocaux ----------
+const SPEEDS = [1, 1.5, 2];
+const voiceTotal = audio => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Number(audio.closest('.voice').dataset.duration) / 1000) || 0;
+async function voiceAction(t, m, e) {
+  const box = t.closest('.voice'), audio = box.querySelector('audio');
+  if (!audio.src) { try { audio.src = await fileUrl(m); } catch (err) { return toast(err.message); } }
+  if (t.dataset.voice === 'play') return audio.paused ? audio.play().catch(() => toast('Lecture impossible')) : audio.pause();
+  if (t.dataset.voice === 'speed') {
+    const next = SPEEDS[(SPEEDS.indexOf(audio.playbackRate) + 1) % SPEEDS.length] || 1;
+    audio.playbackRate = next;
+    t.textContent = `${next}×`.replace('.', ',');
+    return;
+  }
+  if (t.dataset.voice === 'seek') {
+    const r = t.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    audio.currentTime = ratio * voiceTotal(audio);
+    if (audio.paused) audio.play().catch(() => {});
+  }
+}
+// Les événements média ne remontent pas : on les capture au niveau du document.
+const voiceOf = e => (e.target instanceof HTMLAudioElement ? e.target.closest('.voice') : null);
+document.addEventListener('play', e => {
+  const box = voiceOf(e); if (!box) return;
+  document.querySelectorAll('.voice audio').forEach(a => { if (a !== e.target && !a.paused) a.pause(); }); // un seul à la fois
+  box.classList.add('playing');
+  box.querySelector('.voice-play').innerHTML = icon('pause');
+}, true);
+for (const type of ['pause', 'ended']) {
+  document.addEventListener(type, e => {
+    const box = voiceOf(e); if (!box) return;
+    box.classList.remove('playing');
+    box.querySelector('.voice-play').innerHTML = icon('play');
+    if (type === 'ended') { e.target.currentTime = 0; box.style.setProperty('--p', '0%'); box.querySelector('.voice-time').textContent = fmtDur(Number(box.dataset.duration)); }
+  }, true);
+}
+document.addEventListener('timeupdate', e => {
+  const box = voiceOf(e); if (!box) return;
+  const total = voiceTotal(e.target);
+  box.style.setProperty('--p', `${total ? Math.min(100, e.target.currentTime / total * 100) : 0}%`);
+  if (!e.target.paused) box.querySelector('.voice-time').textContent = fmtDur(e.target.currentTime * 1000);
+}, true);
+// Les enregistrements WebM de Chrome n'annoncent pas leur durée : on force son calcul pour pouvoir se déplacer.
+document.addEventListener('loadedmetadata', e => {
+  const a = e.target;
+  if (!voiceOf(e) || Number.isFinite(a.duration)) return;
+  const back = () => { a.removeEventListener('timeupdate', back); a.currentTime = 0; };
+  a.addEventListener('timeupdate', back);
+  a.currentTime = 1e101;
+}, true);
 
 // ---------- Indicateur « est en train d'écrire » ----------
 function renderTyping() {
@@ -933,6 +1001,17 @@ const COMMANDS = [
   { name: 'party', desc: 'Envoie des confettis à tout le monde 🎉', run: a => `🎉 ${a || 'Fête !'} 🎉` },
   { name: 'code', desc: 'Envoie le texte comme bloc de code', run: a => '```\n' + a + '\n```' },
 ];
+// Réduit les niveaux sonores relevés pendant l'enregistrement à n barres (0-100) pour la forme d'onde.
+function downsample(levels, n) {
+  if (!levels.length) return [];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const slice = levels.slice(Math.floor(i * levels.length / n), Math.max(Math.floor((i + 1) * levels.length / n), Math.floor(i * levels.length / n) + 1));
+    out.push(slice.reduce((a, b) => a + b, 0) / slice.length);
+  }
+  const max = Math.max(...out) || 1;
+  return out.map(v => Math.round(v / max * 100));
+}
 function makeComposer(wrap, { target, lastOwn, scope, thread }) {
   wrap.appendChild($('#composerTpl').content.cloneNode(true));
   const root = $('.composer', wrap);
@@ -1060,7 +1139,77 @@ function makeComposer(wrap, { target, lastOwn, scope, thread }) {
     openPicker(e.currentTarget, emoji => insert(emoji));
   };
   $('[data-tool="attach"]', root).onclick = () => fileInput.click();
-  fileInput.onchange = () => { [...fileInput.files].forEach(c.upload); fileInput.value = ''; };
+
+  // Message vocal : clic sur 🎤 -> enregistrement (5 min max) -> Envoyer ou Annuler.
+  const rec = $('.rec', root);
+  let recording = null;
+  $('[data-tool="voice"]', root).onclick = startRecording;
+  $('[data-rec="cancel"]', rec).onclick = () => stopRecording(false);
+  $('[data-rec="send"]', rec).onclick = () => stopRecording(true);
+  document.addEventListener('keydown', e => { if (recording && e.key === 'Escape') { e.preventDefault(); stopRecording(false); } });
+  async function startRecording() {
+    if (recording) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('L\'enregistrement audio n\'est pas disponible dans ce navigateur.');
+    const fixed = target();
+    if (!isDm(fixed.channel)) await ensureChannelKey(fixed.channel).catch(() => {});
+    if (!(await keyFor(fixed.channel))) return toast('Clé de chiffrement indisponible pour cette conversation.');
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+    catch { return toast('Accès au micro refusé : autorise-le via l\'icône à gauche de l\'adresse du site.'); }
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 48000 } : undefined);
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    // Référence locale : le dernier morceau arrive APRÈS stop(), quand `recording` est déjà remis à null.
+    const chunks = [];
+    recording = { mr, stream, audioCtx, chunks, levels: [], t0: Date.now(), target: fixed };
+    mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    mr.start(250);
+    root.classList.add('recording');
+    rec.hidden = false;
+    const bars = $('.rec-bars', rec);
+    bars.innerHTML = '';
+    $('.rec-time', rec).textContent = '0:00';
+    recording.timer = setInterval(() => {
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const v of samples) { const x = (v - 128) / 128; sum += x * x; }
+      const level = Math.min(1, Math.sqrt(sum / samples.length) * 4);
+      recording.levels.push(level);
+      const bar = document.createElement('i');
+      bar.style.height = `${Math.max(8, level * 100)}%`;
+      bars.appendChild(bar);
+      while (bars.children.length > 80) bars.firstChild.remove();
+      const elapsed = Date.now() - recording.t0;
+      $('.rec-time', rec).textContent = fmtDur(elapsed);
+      if (elapsed >= 5 * 60e3) stopRecording(true);
+    }, 100);
+  }
+  function stopRecording(send) {
+    const r = recording;
+    if (!r) return;
+    recording = null;
+    clearInterval(r.timer);
+    root.classList.remove('recording');
+    rec.hidden = true;
+    const duration = Date.now() - r.t0;
+    r.mr.onstop = () => {
+      r.stream.getTracks().forEach(t => t.stop());
+      r.audioCtx.close().catch(() => {});
+      if (!send) return;
+      if (duration < 700) return toast('Message vocal trop court');
+      const type = (r.mr.mimeType || 'audio/webm').split(';')[0];
+      const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+      const file = new File(r.chunks, `vocal-${stamp}.${ext}`, { type });
+      c.upload(file, { voice: { duration, peaks: downsample(r.levels, 48) } }, r.target);
+    };
+    r.mr.stop();
+  }
+  fileInput.onchange = () => { [...fileInput.files].forEach(f => c.upload(f)); fileInput.value = ''; };
   ta.addEventListener('paste', e => {
     const files = [...e.clipboardData.files];
     if (files.length) { e.preventDefault(); files.forEach(f => c.upload(f.name === 'image.png' ? new File([f], `capture-${Date.now()}.png`, { type: f.type }) : f)); }
@@ -1068,8 +1217,8 @@ function makeComposer(wrap, { target, lastOwn, scope, thread }) {
 
   // Envoi d'un fichier : chiffré dans le navigateur, envoyé, puis annoncé par un message chiffré qui porte
   // son nom, son type et son IV.
-  c.upload = async file => {
-    const { channel, parent } = target();
+  c.upload = async (file, extra = {}, fixedTarget = null) => {
+    const { channel, parent } = fixedTarget || target();
     if (!isDm(channel)) await ensureChannelKey(channel).catch(() => {});
     const key = await keyFor(channel);
     if (!key) return toast('Clé de chiffrement indisponible pour cette conversation.');
@@ -1090,7 +1239,7 @@ function makeComposer(wrap, { target, lastOwn, scope, thread }) {
       try {
         if (xhr.status >= 300) { let msg = 'Échec de l\'envoi'; try { msg = JSON.parse(xhr.responseText).error; } catch {} throw new Error(msg); }
         const { fileId } = JSON.parse(xhr.responseText);
-        const enc = await E2E.encryptPayload(key, { text: '', file: { name: file.name, type: file.type, size: file.size, iv: encrypted.iv } }, channel);
+        const enc = await E2E.encryptPayload(key, { text: '', file: { name: file.name, type: file.type, size: file.size, iv: encrypted.iv, ...extra } }, channel);
         await api('/api/messages', { method: 'POST', body: JSON.stringify({ channel, parent, enc, fileId }) });
       } catch (e) { toast(e.message); }
       row.remove();
@@ -1121,7 +1270,7 @@ function setupDrop(area, composer, enabled) {
   area.addEventListener('dragover', e => e.preventDefault());
   area.addEventListener('drop', e => {
     e.preventDefault(); depth = 0; overlay.classList.remove('on');
-    if (enabled()) [...e.dataTransfer.files].forEach(composer.upload);
+    if (enabled()) [...e.dataTransfer.files].forEach(f => composer.upload(f));
   });
 }
 setupDrop($('#main'), mainComposer, () => state.view === 'channel');
@@ -1236,7 +1385,7 @@ function notify(m, inThread) {
   if (!(inThread || isDm(m.channel) || isMentioned(m) || document.hidden)) return;
   ping();
   const where = inThread ? `a répondu dans un fil · ${label(m.channel)}` : label(m.channel);
-  const body = m.text ? m.text.slice(0, 140) : m.file ? '📎 ' + (m.file.name || 'fichier') : '🔒 Message chiffré';
+  const body = m.text ? m.text.slice(0, 140) : m.file ? (m.file.voice ? '🎤 Message vocal' : '📎 ' + (m.file.name || 'fichier')) : '🔒 Message chiffré';
   const open = () => { if (inThread) { openChannel(m.channel); openThread(m.parent, m.id); } else openChannel(m.channel); };
   if (!document.hidden && (inThread || isDm(m.channel) || isMentioned(m))) toast(`${m.user} ${inThread ? 'a répondu dans un fil' : '· ' + label(m.channel)} : ${body.slice(0, 60)}`, open);
   if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
