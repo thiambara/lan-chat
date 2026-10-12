@@ -49,6 +49,8 @@ Le chat tourne alors sur un vrai domaine avec un certificat Let's Encrypt (plus 
 4. *Advanced → Volumes* : volume monté sur `/data` (fichiers envoyés).
 5. *Domains* : port `3000`, HTTPS activé. Puis *Deploy*.
 
+**Déploiement automatique** : la production (https://chat.digita.sn) est redéployée à chaque push sur `main`, via un webhook GitHub qui appelle l'URL de déploiement du service dans Dokploy (onglet *Deployments* → *Webhook URL*). Il n'y a pas de tests automatiques : vérifier en local avant de pousser.
+
 **Sauvegardes** : la base Postgres (sauvegardes planifiables dans Dokploy) **et** le volume des fichiers (`lanchat-files` ou `/data`). Les contenus sensibles y sont chiffrés ; seules les métadonnées sont en clair.
 
 **En local avec Docker** :
