@@ -285,13 +285,12 @@ const Call = (() => {
   })();
 
   // ---------- Notification d'appel entrant ----------
-  let titleTimer;
+  let titleTimer = null, titleBefore = '';
   function notifyIncoming(from) {
     stopTitleFlash();
-    const original = document.title;
+    titleBefore = document.title;
     let on = false;
-    titleTimer = setInterval(() => { on = !on; document.title = on ? `📞 Appel de ${from}` : original; }, 1000);
-    titleTimer.original = original;
+    titleTimer = setInterval(() => { on = !on; document.title = on ? `📞 Appel de ${from}` : titleBefore; }, 1000);
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
       const n = new Notification(`📞 Appel audio de ${from}`, { body: 'Clique pour répondre', tag: 'lanchat-call', requireInteraction: true });
       n.onclick = () => { window.focus(); n.close(); };
@@ -300,8 +299,9 @@ const Call = (() => {
   function stopTitleFlash() {
     if (!titleTimer) return;
     clearInterval(titleTimer);
-    document.title = titleTimer.original;
     titleTimer = null;
+    document.title = titleBefore;
+    renderSidebar(); // recalcule le titre avec le nombre de non-lus
   }
 
   // ---------- Interface ----------

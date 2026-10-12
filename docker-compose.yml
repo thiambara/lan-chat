@@ -1,10 +1,14 @@
-# LAN Chat + PostgreSQL — déploiement Dokploy en mode « Docker Compose » (voir README).
+# LAN Chat + PostgreSQL (+ relais TURN optionnel) — déploiement Dokploy en mode « Docker Compose » (voir README).
 # Le domaine et le certificat HTTPS se configurent dans l'onglet « Domains » de Dokploy
-# (service « lanchat », port du conteneur : 3000). Aucun port n'est publié sur l'hôte.
+# (service « lanchat », port du conteneur : 3000). Aucun port n'est publié sur l'hôte pour l'app et la base.
 #
 # Variables à définir dans Dokploy (onglet Environment) :
 #   POSTGRES_PASSWORD   mot de passe de la base (obligatoire, long et aléatoire)
 #   LANCHAT_CODE        code demandé pour créer un compte (vide = généré, affiché dans les logs)
+# Relais TURN pour les appels audio (optionnel, voir README « Appels audio ») :
+#   COMPOSE_PROFILES=turn   démarre le service coturn
+#   TURN_SECRET             secret partagé app/coturn (long et aléatoire)
+#   TURN_HOST               nom DNS du VPS (défaut : chat.digita.sn)
 services:
   lanchat:
     build: .
@@ -12,6 +16,9 @@ services:
     environment:
       DATABASE_URL: postgres://lanchat:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/lanchat
       LANCHAT_CODE: ${LANCHAT_CODE:-}
+      # Sans TURN_SECRET, l'app n'annonce pas le relais (STUN seul).
+      LANCHAT_TURN_URLS: turn:${TURN_HOST:-chat.digita.sn}:3478?transport=udp,turn:${TURN_HOST:-chat.digita.sn}:3478?transport=tcp
+      LANCHAT_TURN_SECRET: ${TURN_SECRET:-}
     volumes:
       - lanchat-files:/data
     expose:
@@ -34,6 +41,43 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  # Relais TURN (coturn) : sert les appels audio quand les deux navigateurs ne peuvent pas se joindre
+  # directement (réseaux d'entreprise, 4G stricte…). Réseau de l'hôte : ports UDP/TCP 3478 et UDP 49160-49200,
+  # à ouvrir dans le pare-feu du VPS (Docker ne publie rien en mode host, c'est UFW qui décide).
+  # Sécurité : identifiants temporaires signés par TURN_SECRET (générés par l'app), pas de relais vers les
+  # réseaux privés/locaux (empêche d'atteindre les conteneurs ou le réseau interne du serveur), quotas.
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_REALM: ${TURN_HOST:-chat.digita.sn}
+    # Le secret est vérifié au démarrage du conteneur (et non à la lecture du fichier) : sans lui, le reste
+    # du compose se déploie normalement tant que le profil « turn » n'est pas activé.
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ -z "$$TURN_SECRET" ]; then echo "TURN_SECRET manquant : relais TURN non démarré" >&2; exit 1; fi
+        exec turnserver -n --log-file=stdout \
+          --listening-port=3478 --min-port=49160 --max-port=49200 \
+          --realm="$$TURN_REALM" --use-auth-secret --static-auth-secret="$$TURN_SECRET" \
+          --fingerprint --no-cli --no-tls --no-dtls --no-multicast-peers \
+          --stale-nonce=600 --user-quota=12 --total-quota=1200 \
+          --denied-peer-ip=0.0.0.0-0.255.255.255 \
+          --denied-peer-ip=10.0.0.0-10.255.255.255 \
+          --denied-peer-ip=100.64.0.0-100.127.255.255 \
+          --denied-peer-ip=127.0.0.0-127.255.255.255 \
+          --denied-peer-ip=169.254.0.0-169.254.255.255 \
+          --denied-peer-ip=172.16.0.0-172.31.255.255 \
+          --denied-peer-ip=192.0.0.0-192.0.0.255 \
+          --denied-peer-ip=192.168.0.0-192.168.255.255 \
+          --denied-peer-ip=198.18.0.0-198.19.255.255 \
+          --denied-peer-ip=::1 \
+          --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff \
+          --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
 
 volumes:
   lanchat-files:

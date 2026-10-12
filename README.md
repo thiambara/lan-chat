@@ -65,7 +65,15 @@ Bouton 📞 en haut d'une conversation privée : appel en tête-à-tête, sonner
 
 - Le son va directement d'un navigateur à l'autre (WebRTC), chiffré (DTLS-SRTP). Le serveur ne fait que la mise en relation, et les descriptions de session qu'il relaie sont chiffrées avec la clé de la conversation : il ne peut pas s'intercaler.
 - Par défaut, un serveur STUN public aide les navigateurs à se trouver (`LANCHAT_STUN`, vide pour le désactiver). Ça suffit au bureau et sur la plupart des box/4G.
-- Réseaux très fermés : ajouter un relais **TURN** (coturn) et le déclarer avec `LANCHAT_TURN_URLS=turn:turn.exemple.sn:3478` et `LANCHAT_TURN_SECRET=…` (identique au `static-auth-secret` de coturn) ; le serveur fournit alors des identifiants temporaires.
+- Réseaux très fermés : relais **TURN** (coturn). Le serveur remet à chaque client des identifiants temporaires (12 h) signés par un secret partagé avec coturn (`LANCHAT_TURN_URLS`, `LANCHAT_TURN_SECRET`).
+
+**Activer le relais TURN sur Dokploy** (service coturn déjà prévu dans `docker-compose.yml`, profil `turn`) :
+1. Pare-feu du VPS (UFW ; en réseau « host », c'est lui qui filtre) :
+   ```bash
+   sudo ufw allow 3478/udp comment coturn && sudo ufw allow 3478/tcp comment coturn && sudo ufw allow 49160:49200/udp comment coturn-relay
+   ```
+2. Dokploy → service → *Environment* : `COMPOSE_PROFILES=turn` et `TURN_SECRET=` un secret long (`openssl rand -hex 32`). `TURN_HOST` vaut `chat.digita.sn` par défaut.
+3. Redéployer. coturn n'accepte que des identifiants valides et refuse de relayer vers les réseaux privés du serveur.
 
 ## Sécurité
 
