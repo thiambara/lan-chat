@@ -419,6 +419,42 @@ async function handle(req, res) {
     }
   }
 
+  // ----- Appels audio (WebRTC) -----
+  // Serveurs ICE : STUN public par défaut ; TURN optionnel (coturn avec « static-auth-secret ») via
+  // LANCHAT_TURN_URLS="turn:turn.exemple.sn:3478?transport=udp,turns:…" et LANCHAT_TURN_SECRET=….
+  if (p === '/api/ice' && req.method === 'GET') {
+    const iceServers = [];
+    const stun = process.env.LANCHAT_STUN ?? 'stun:stun.l.google.com:19302';
+    if (stun) iceServers.push({ urls: stun.split(',').map(s => s.trim()).filter(Boolean) });
+    const turnUrls = (process.env.LANCHAT_TURN_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (turnUrls.length && process.env.LANCHAT_TURN_SECRET) {
+      // Identifiants éphémères (12 h), format attendu par coturn --use-auth-secret
+      const username = `${Math.floor(Date.now() / 1000) + 12 * 3600}:${me}`;
+      const credential = crypto.createHmac('sha1', process.env.LANCHAT_TURN_SECRET).update(username).digest('base64');
+      iceServers.push({ urls: turnUrls, username, credential });
+    }
+    return json(res, 200, { iceServers });
+  }
+
+  // Signalisation : relaie un message d'appel (sonnerie, offre/réponse chiffrées, raccrocher…) à
+  // tous les onglets du destinataire. Réponse et refus sont aussi copiés aux autres onglets de
+  // l'appelé, pour qu'ils arrêtent de sonner.
+  if (p === '/api/call' && req.method === 'POST') {
+    const body = await readJson(req);
+    const to = String(body.to || '');
+    const kind = String(body.kind || '');
+    const callId = String(body.callId || '');
+    const KINDS = ['offer', 'answer', 'decline', 'cancel', 'hangup', 'busy'];
+    if (!users[to] || to === me || !KINDS.includes(kind) || !/^[\w-]{8,64}$/.test(callId)) return json(res, 400, { error: 'Signal d\'appel invalide' });
+    if (body.enc && !validEnc(body.enc)) return json(res, 400, { error: 'Signal d\'appel invalide' });
+    const online = [...clients].some(c => c.user === to);
+    const signal = { from: me, to, kind, callId, deviceId: String(body.deviceId || '').slice(0, 64), enc: body.enc || null };
+    for (const c of clients) {
+      if (c.user === to || (c.user === me && (kind === 'answer' || kind === 'decline'))) send(c, 'call', signal);
+    }
+    return json(res, 200, { delivered: online });
+  }
+
   // Indicateur « est en train d'écrire »
   if (p === '/api/typing' && req.method === 'POST') {
     const body = await readJson(req);

@@ -59,6 +59,14 @@ POSTGRES_PASSWORD=change-moi docker compose up --build
 ```
 (ajouter `ports: ["3000:3000"]` au service `lanchat` pour y accéder sur http://localhost:3000).
 
+## Appels audio
+
+Bouton 📞 en haut d'une conversation privée : appel en tête-à-tête, sonnerie, couper le micro, raccrocher ; la trace (« Appel audio · 3 min », « Appel manqué ») reste dans la conversation.
+
+- Le son va directement d'un navigateur à l'autre (WebRTC), chiffré (DTLS-SRTP). Le serveur ne fait que la mise en relation, et les descriptions de session qu'il relaie sont chiffrées avec la clé de la conversation : il ne peut pas s'intercaler.
+- Par défaut, un serveur STUN public aide les navigateurs à se trouver (`LANCHAT_STUN`, vide pour le désactiver). Ça suffit au bureau et sur la plupart des box/4G.
+- Réseaux très fermés : ajouter un relais **TURN** (coturn) et le déclarer avec `LANCHAT_TURN_URLS=turn:turn.exemple.sn:3478` et `LANCHAT_TURN_SECRET=…` (identique au `static-auth-secret` de coturn) ; le serveur fournit alors des identifiants temporaires.
+
 ## Sécurité
 
 - **Comptes** : pseudo + mot de passe personnel, création protégée par le code d'accès. Le mot de passe **ne quitte jamais le navigateur** : il est dérivé (PBKDF2, 310 000 itérations) en une clé d'authentification, seule envoyée au serveur, qui la re-hache (scrypt). Blocage progressif après 5 échecs.

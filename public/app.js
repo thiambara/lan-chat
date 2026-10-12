@@ -150,6 +150,7 @@ async function decryptMsg(m) {
     const p = await E2E.decryptPayload(key, m.enc, m.channel);
     m.text = p.text || '';
     if (m.file && p.file) m.file = { ...m.file, ...p.file, e2e: true };
+    if (p.call) m.call = p.call;
     m.locked = false;
   } catch { m.text = ''; m.locked = true; }
   return m;
@@ -397,7 +398,23 @@ function threadSumHtml(m) {
 }
 
 // Texte du message, avec « (modifié) » collé à la fin du dernier paragraphe
+// Trace d'un appel audio, écrite par l'appelant à la fin de l'appel (voir call.js)
+const fmtCallDur = ms => { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')}`; };
+function callHtml(m) {
+  const c = m.call, mine = m.user === state.me;
+  const label = {
+    ended: `Appel audio · ${fmtCallDur(c.duration || 0)}`,
+    missed: mine ? 'Appel sans réponse' : 'Appel manqué',
+    declined: 'Appel refusé',
+    busy: mine ? 'Correspondant déjà en ligne' : 'Appel manqué (tu étais déjà en ligne)',
+    failed: 'Appel interrompu : connexion impossible',
+  }[c.status] || 'Appel audio';
+  const bad = c.status !== 'ended';
+  return `<div class="call-log${bad ? ' missed' : ''}">${icon(bad ? 'phone-off' : 'phone')}<span>${esc(label)}</span>
+    ${isDm(m.channel) && !isSelf(m.channel) ? `<button class="btn-sm" data-act="callback">Rappeler</button>` : ''}</div>`;
+}
 function bodyHtml(m) {
+  if (m.call) return callHtml(m);
   if (m.locked) return `<p class="locked">${icon('lock')} Message chiffré — la clé n'est pas encore disponible sur ce poste</p>`;
   const html = m.text ? renderText(m.text) : '';
   if (!m.edited) return html;
@@ -429,7 +446,7 @@ function renderMessage(m, prev, opts = {}) {
       ${canThread ? `<button data-act="thread" title="Répondre dans un fil">${icon('thread')}</button>` : ''}
       <span class="sep"></span>
       ${m.text ? `<button data-act="copy" title="Copier le texte">${icon('copy')}</button>` : ''}
-      ${mine ? `<button data-act="edit" title="Modifier">${icon('edit')}</button><button class="del" data-act="delete" title="Supprimer">${icon('trash')}</button>` : ''}
+      ${mine && !m.call ? `<button data-act="edit" title="Modifier">${icon('edit')}</button>` : ''}${mine ? `<button class="del" data-act="delete" title="Supprimer">${icon('trash')}</button>` : ''}
     </div>`;
   el._msg = m; el._prev = prev; el._opts = opts;
   return el;
@@ -494,6 +511,7 @@ function setTopbar(iconHtml, title, sub, avatarOf) {
   $('#subtitle').textContent = sub;
 }
 function renderTopbar() {
+  $('#callBtn').hidden = !(state.view === 'channel' && isDm(state.current) && !isSelf(state.current));
   if (state.view !== 'channel') return;
   const ch = state.current;
   if (isSelf(ch)) {
@@ -588,6 +606,7 @@ function markRead(ch, id) {
 // ---------- Navigation ----------
 function setView(view) {
   state.view = view;
+  $('#callBtn').hidden = true;
   $('#mainComposer').hidden = view !== 'channel';
   if (view !== 'channel') $('#keyWait').hidden = true;
   $('#app').classList.remove('open');
@@ -918,6 +937,7 @@ document.addEventListener('click', async e => {
     case 'copy': return copy(m.text);
     case 'edit': return startEdit(el);
     case 'delete': return deleteMsg(m);
+    case 'callback': return Call.start(dmOther(m.channel));
   }
 });
 
@@ -1308,6 +1328,7 @@ function connect() {
     if (state.thread) openThread(state.thread.id);
   });
   on('presence', d => { state.online = d.online; renderSidebar(); });
+  on('call', d => Call.onSignal(d));
   on('channels', d => { state.channels = d.channels; renderSidebar(); });
   on('user', u => { state.users.set(u.name, u.pub); state.known.add(u.name); renderSidebar(); scheduleShare(); });
   on('keys', async ({ channel, holders }) => {
@@ -1385,7 +1406,7 @@ function notify(m, inThread) {
   if (!(inThread || isDm(m.channel) || isMentioned(m) || document.hidden)) return;
   ping();
   const where = inThread ? `a répondu dans un fil · ${label(m.channel)}` : label(m.channel);
-  const body = m.text ? m.text.slice(0, 140) : m.file ? (m.file.voice ? '🎤 Message vocal' : '📎 ' + (m.file.name || 'fichier')) : '🔒 Message chiffré';
+  const body = m.text ? m.text.slice(0, 140) : m.call ? (m.call.status === 'ended' ? '📞 Appel audio terminé' : '📞 Appel manqué') : m.file ? (m.file.voice ? '🎤 Message vocal' : '📎 ' + (m.file.name || 'fichier')) : '🔒 Message chiffré';
   const open = () => { if (inThread) { openChannel(m.channel); openThread(m.parent, m.id); } else openChannel(m.channel); };
   if (!document.hidden && (inThread || isDm(m.channel) || isMentioned(m))) toast(`${m.user} ${inThread ? 'a répondu dans un fil' : '· ' + label(m.channel)} : ${body.slice(0, 60)}`, open);
   if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
@@ -1408,6 +1429,7 @@ $('#channelForm').onsubmit = async e => {
   } catch (err) { toast(err.message); }
 };
 $('#menu').onclick = () => $('#app').classList.toggle('open');
+$('#callBtn').onclick = () => Call.start(dmOther(state.current));
 $('#backdrop').onclick = () => $('#app').classList.remove('open');
 $('#wsHost').innerHTML = `${icon('bubble', 'width:12px;height:12px')}${esc(location.host)}`;
 $('#invite').onclick = () => copy(location.origin);
