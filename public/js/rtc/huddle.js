@@ -275,11 +275,15 @@ export const Huddle = (() => {
     const status = h.joining ? 'Connexion…' : fmtDur(Date.now() - (h.startedAt || Date.now()));
     const canShare = Screen.supported() && !h.joining;
     ui.className = 'call-bar huddle-bar active';
-    ui.innerHTML = `<div class="call-info"><div class="call-name">${icon('headphones', 'sm')} ${esc(label(h.channel))}</div><div class="call-status">${status} · ${people.length} participant${people.length > 1 ? 's' : ''}</div></div>
-      ${canShare ? `<button type="button" class="call-btn small${h.screenTrack ? ' sharing' : ''}" data-huddle="screen" title="${h.screenTrack ? 'Arrêter le partage d\'écran' : 'Partager mon écran'}">${icon('screen')}</button>` : ''}
-      <button type="button" class="call-btn small${h.muted ? ' muted' : ''}" data-huddle="mute" title="${h.muted ? 'Réactiver le micro' : 'Couper le micro'}">${icon(h.muted ? 'mic-off' : 'mic')}</button>
-      <button type="button" class="call-btn small decline" data-huddle="leave" title="Quitter l’appel" aria-label="Quitter l’appel">${icon('phone-off')}</button>
-      <div class="hu-avs">${avatars}</div>`;
+    const tip = t => `title="${t}" aria-label="${t}"`;
+    ui.innerHTML = `<div class="call-head"><div class="call-info"><div class="call-name">${icon('headphones', 'sm')} ${esc(label(h.channel))}</div><div class="call-status">${status} · ${people.length} participant${people.length > 1 ? 's' : ''}</div></div></div>
+      <div class="hu-avs">${avatars}</div>
+      <div class="call-row">
+        <button type="button" class="call-btn small${h.muted ? ' muted' : ''}" data-huddle="mute" ${tip(h.muted ? 'Réactiver le micro' : 'Couper le micro')}>${icon(h.muted ? 'mic-off' : 'mic')}</button>
+        ${canShare ? `<button type="button" class="call-btn small${h.screenTrack ? ' sharing' : ''}" data-huddle="screen" ${tip(h.screenTrack ? 'Arrêter le partage d’écran' : 'Partager mon écran')}>${icon('screen')}</button>` : ''}
+        <span class="call-spacer"></span>
+        <button type="button" class="call-btn small decline wide" data-huddle="leave" ${tip('Quitter l’appel')}>${icon('phone-off')}</button>
+      </div>`;
     if (!h.joining) clock = setInterval(() => { const s = ui.querySelector('.call-status'); if (s && h) s.textContent = `${fmtDur(Date.now() - h.startedAt)} · ${people.length} participant${people.length > 1 ? 's' : ''}`; }, 1000);
   }
   ui.addEventListener('click', e => {

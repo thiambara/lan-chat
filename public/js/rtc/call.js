@@ -351,11 +351,15 @@ export const Call = (() => {
     }[c.state];
     const canShare = Screen.supported() && c.videoTx && c.state === 'active';
     ui.className = 'call-bar' + (c.state === 'active' ? ' active' : '');
-    ui.innerHTML = `${avatar}
-      <div class="call-info"><div class="call-name">${esc(nameOf(c.peer))}</div><div class="call-status">${status}</div></div>
-      ${canShare ? `<button type="button" class="call-btn small${c.screenTrack ? ' sharing' : ''}" data-call="screen" title="${c.screenTrack ? 'Arrêter le partage d\'écran' : 'Partager mon écran'}">${icon('screen')}</button>` : ''}
-      <button type="button" class="call-btn small${c.muted ? ' muted' : ''}" data-call="mute" title="${c.muted ? 'Réactiver le micro' : 'Couper le micro'}" ${c.stream ? '' : 'disabled'}>${icon(c.muted ? 'mic-off' : 'mic')}</button>
-      <button type="button" class="call-btn small decline" data-call="hangup" title="Raccrocher">${icon('phone-off')}</button>`;
+    const tip = t => `title="${t}" aria-label="${t}"`;
+    ui.innerHTML = `<div class="call-head">${avatar}
+        <div class="call-info"><div class="call-name">${esc(nameOf(c.peer))}</div><div class="call-status">${status}</div></div></div>
+      <div class="call-row">
+        <button type="button" class="call-btn small${c.muted ? ' muted' : ''}" data-call="mute" ${tip(c.muted ? 'Réactiver le micro' : 'Couper le micro')} ${c.stream ? '' : 'disabled'}>${icon(c.muted ? 'mic-off' : 'mic')}</button>
+        ${canShare ? `<button type="button" class="call-btn small${c.screenTrack ? ' sharing' : ''}" data-call="screen" ${tip(c.screenTrack ? 'Arrêter le partage d’écran' : 'Partager mon écran')}>${icon('screen')}</button>` : ''}
+        <span class="call-spacer"></span>
+        <button type="button" class="call-btn small decline wide" data-call="hangup" ${tip('Raccrocher')}>${icon('phone-off')}</button>
+      </div>`;
     if (c.state === 'active') clock = setInterval(() => { const s = ui.querySelector('.call-status'); if (s && call === c) s.textContent = fmtDur(Date.now() - c.startedAt) + (c.screenTrack ? ' · tu partages ton écran' : c.peerSharing ? ' · écran partagé' : ''); }, 1000);
   }
   ui.addEventListener('click', e => {

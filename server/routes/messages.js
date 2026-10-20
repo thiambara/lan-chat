@@ -265,7 +265,7 @@ setInterval(() => {
   for (const [user, items] of Object.entries(M.saved)) {
     if (!rt.isOnline(user)) continue; // le rappel attend que la personne soit connectée
     for (const [id, s] of items) {
-      if (!s.remindAt || s.reminded || s.done || s.remindAt > now || !M.byId.has(id)) continue;
+      if (!s.remindAt || s.reminded || s.done || s.remindAt > now || !M.byId.has(id) || !M.canSee(user, M.byId.get(id).channel)) continue;
       s.reminded = true;
       M.db.write(M.db.S.saveSaved(user, id, s)).catch(() => {});
       rt.toUser(user, 'reminder', savedView(id, s));

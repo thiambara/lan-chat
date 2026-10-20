@@ -126,7 +126,7 @@ route('POST', '/api/read', async ({ me, body }) => {
   if (b.latest) id = (thread ? M.replies.get(Number(thread[1])) || [] : M.messages.filter(m => m.channel === key)).at(-1)?.id || 0;
   if (id > M.readOf(me, key) || b.force) {
     await M.setRead(me, key, id);
-    rt.toUser(me, 'read', { key, id });
+    rt.toUser(me, 'read', { key, id, unread: M.unreadOne(me, key) });
   }
   return { key, id: M.readOf(me, key) };
 });

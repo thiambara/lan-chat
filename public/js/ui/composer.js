@@ -8,7 +8,7 @@ import { EMOJIS } from '../lib/emoji-data.js';
 import { E2E } from '../lib/e2e.js';
 import { state, bus, isDm, nameOf, people, channel, isOnline } from '../core/state.js';
 import { api, post, upload } from '../core/api.js';
-import { keyFor, ensureChannelKey, encryptFor } from '../core/keys.js';
+import { keyFor, ensureChannelKey, encryptFor, waitForKey } from '../core/keys.js';
 import { toast, menu, modal } from './layer.js';
 import { openPicker, closePicker, pickerOpen, addRecent } from './picker.js';
 import { avatarHtml } from './avatar.js';
@@ -251,16 +251,15 @@ export function makeComposer(host, opts) {
   }
 
   // ---------- Envoi ----------
-  async function prepare() {
-    let text = ta.value;
-    if (!text.trim()) return null;
+  // Transforme le texte saisi en contenu à chiffrer (commandes, sondage) ; null = rien à envoyer
+  async function prepare(text) {
     const payload = {};
     const cmd = text.match(/^\/(\w+)(?:\s([\s\S]*))?$/);
     if (cmd) {
       const found = COMMANDS.find(x => x.name === cmd[1]);
       if (!found) { toast(`Commande inconnue : /${cmd[1]}`); return null; }
       const arg = (cmd[2] || '').trim();
-      if (found.local) { ta.value = ''; refresh(); saveDraft(); await found.local(arg).catch(err => toast(err.message)); return null; }
+      if (found.local) { await found.local(arg).catch(err => toast(err.message)); return false; }
       if (found.name === 'poll') {
         const [question, ...options] = parseArgs(arg);
         if (!question || options.length < 2) { toast('Exemple : /poll "On déjeune où ?" "Thiéboudienne" "Pizza"'); return null; }
@@ -273,14 +272,18 @@ export function makeComposer(host, opts) {
     return payload;
   }
   async function send(at = null) {
-    const payload = await prepare();
-    if (!payload) return;
+    const original = ta.value;
+    if (!original.trim()) return;
     const { channel: ch, parent } = opts.target();
     const broadcast = opts.thread && $('input', bc).checked;
-    if (!isDm(ch)) await ensureChannelKey(ch).catch(() => {});
-    const original = ta.value;
+    // La zone se vide tout de suite (pas de double envoi) ; le texte revient si l'envoi échoue
     ta.value = ''; refresh(); hideAc(); drafts.set(c.key, '');
+    const restore = () => { if (!ta.value) { ta.value = original; refresh(); saveDraft(); } };
+    const payload = await prepare(original);
+    if (payload === false) return;
+    if (!payload) return restore();
     try {
+      if (!isDm(ch)) await ensureChannelKey(ch).catch(() => {});
       const enc = await encryptFor(ch, payload);
       const mentions = extractMentions(payload.text, n => state.users.has(n));
       if (at) {
@@ -291,7 +294,7 @@ export function makeComposer(host, opts) {
         if ((payload.text || '').includes('🎉')) confetti();
       }
       if (broadcast) $('input', bc).checked = false;
-    } catch (e) { ta.value = original; refresh(); saveDraft(); toast(e.message); }
+    } catch (e) { restore(); toast(e.message); }
   }
   $('.c-go', root).onclick = () => send();
   $('.c-later', root).onclick = e => {
@@ -330,6 +333,7 @@ export function makeComposer(host, opts) {
   c.upload = async (file, extra = {}, fixedTarget = null) => {
     const { channel: ch, parent } = fixedTarget || opts.target();
     if (!isDm(ch)) await ensureChannelKey(ch).catch(() => {});
+    await waitForKey(ch);
     const key = await keyFor(ch);
     if (!key) return toast('Clé de chiffrement indisponible pour cette conversation.');
     const row = h(`<div class="up">${icon('lock', 'sm')}<span class="uname">${esc(file.name)}</span><small>Chiffrement…</small><span class="bar"><i></i></span></div>`);

@@ -50,7 +50,8 @@ function voiceHtml(f) {
 function callHtml(m) {
   const c = m.call, mine = m.user === state.me;
   if (c.kind === 'group') {
-    const live = c.status === 'started' && state.rooms[m.channel];
+    const room = c.status === 'started' && state.rooms[m.channel];
+    const live = room && !room.members.some(x => x.user === state.me);
     const text = c.status === 'started' ? `${mine ? 'Tu as démarré' : 'A démarré'} un appel de groupe` : `Appel de groupe terminé · ${fmtCallDur(c.duration || 0)}`;
     return `<div class="call-log">${icon('headphones')}<span>${esc(text)}</span>${live ? `<button type="button" class="btn sm primary" data-huddle-join="${esc(m.channel)}">Rejoindre</button>` : ''}</div>`;
   }

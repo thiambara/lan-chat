@@ -45,7 +45,7 @@ route('GET', '/api/prelogin', ({ url }) => {
   return { exists: !!u, kdfSalt: u ? u.kdfSalt : null, workspace: M.workspace.name };
 }, { public: true });
 
-route('POST', '/api/register', async ({ body }) => {
+route('POST', '/api/register', async ({ body, ctx }) => {
   const b = await body();
   const name = str(b.name, 64);
   if (!NAME_RE.test(name)) fail(400, 'Pseudo invalide (2 à 32 lettres, chiffres, . - _)');
@@ -76,6 +76,7 @@ route('POST', '/api/register', async ({ body }) => {
   await M.db.batch(ops);
   rt.broadcast('user', M.userView(name));
   for (const c of M.channels.values()) if (M.members.get(c.name).has(name)) rt.broadcast('channel', M.channelView(c), c.name);
+  ctx.status = 201;
   return { token: await newSession(name), name };
 }, { public: true });
 

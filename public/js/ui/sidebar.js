@@ -50,7 +50,7 @@ export function renderSidebar() {
     item({ view: 'drafts' }, `<span class="s-ic">${icon('draft')}</span><span class="s-name">Brouillons et envois</span>${draftCount ? `<span class="s-name" style="flex:none"><small>${draftCount}</small></span>` : ''}`),
   ].join('');
 
-  const mine = [...state.channels.values()].filter(c => c.members.includes(state.me) && (!c.archived || unreadOf(c.name).count));
+  const mine = [...state.channels.values()].filter(c => c.members.includes(state.me) && (!c.archived || unreadOf(c.name).count || state.route.ch === c.name));
   const humans = people().filter(u => !prefOf(dmId(u.name)).hidden || unreadOf(dmId(u.name)).count);
   const starred = [
     ...mine.filter(c => prefOf(c.name).starred).map(channelItem),

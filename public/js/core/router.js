@@ -16,21 +16,35 @@ export const hrefOf = r => r.view === 'channel'
   : `#/${r.view}${r.q ? '/' + encodeURIComponent(r.q) : ''}`;
 export const linkToMessage = (ch, id) => location.origin + location.pathname + hrefOf({ view: 'channel', ch, msg: id });
 
-// replace : remplace l'entrée de l'historique (recherche en cours de frappe, redirections)
+// replace : remplace l'entrée de l'historique (recherche en cours de frappe, redirections).
+// La navigation est synchrone (History API) : la vue change dans le même instant que le clic.
 export function go(r, { replace = false } = {}) {
   const href = hrefOf(r);
-  if (location.hash === href) return apply(r);
-  if (replace) { history.replaceState(null, '', href); apply(r); }
-  else location.hash = href;
+  if (location.hash !== href) history[replace ? 'replaceState' : 'pushState'](null, '', href);
+  apply(r);
 }
 export const openConvo = (ch, msg = null) => go({ view: 'channel', ch, msg });
 
+let applied = '';
 function apply(r) {
+  applied = hrefOf(r);
   state.route = r;
   if (r.view === 'channel') store.set('channel', r.ch);
   bus.emit('route', r);
 }
-addEventListener('hashchange', () => { const r = parse(); if (r) apply(r); });
+// Précédent / Suivant, liens collés dans la barre d'adresse
+const onHistory = () => { const r = parse(); if (r && hrefOf(r) !== applied) apply(r); };
+addEventListener('popstate', onHistory);
+addEventListener('hashchange', onHistory);
+// Liens internes (#/…) : interceptés pour une navigation immédiate (Ctrl/⌘-clic garde le nouvel onglet)
+document.addEventListener('click', e => {
+  const a = e.target.closest?.('a[href^="#/"]');
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const r = parse(a.getAttribute('href'));
+  if (!r) return;
+  e.preventDefault();
+  go(r);
+});
 export function startRouter() {
   const r = parse() || { view: 'channel', ch: store.get('channel') || 'general', msg: null };
   go(r, { replace: true });

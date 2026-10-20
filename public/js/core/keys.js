@@ -82,7 +82,18 @@ export async function decryptMsg(m) {
   return m;
 }
 export const decryptAll = list => Promise.all(list.map(decryptMsg));
+// Clé d'un canal pas encore reçue (compte tout neuf, nouveau membre) : elle arrive en général en quelques
+// secondes, partagée par un membre connecté. On l'attend un peu plutôt que d'échouer tout de suite.
+export async function waitForKey(ch, ms = 8000) {
+  if (isDm(ch) || state.chKeys.has(ch)) return;
+  const end = Date.now() + ms;
+  while (!state.chKeys.has(ch) && Date.now() < end) {
+    await new Promise(r => setTimeout(r, 700));
+    if (!state.chKeys.has(ch)) await reloadKeys().catch(() => {});
+  }
+}
 export async function encryptFor(ch, payload) {
+  await waitForKey(ch);
   const key = await keyFor(ch);
   if (!key) throw new Error(isDm(ch) ? 'Cette personne n’a pas de compte : impossible de lui écrire.' : 'La clé de chiffrement du canal n’est pas encore arrivée.');
   return E2E.encryptPayload(key, payload, ch);

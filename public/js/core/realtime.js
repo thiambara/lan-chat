@@ -101,10 +101,11 @@ const core = {
   },
   async update(m) { await decryptMsg(m); bus.emit('update', m); },
   delete(d) { bus.emit('delete', d); },
-  read({ key, id }) {
+  read({ key, id, unread }) {
     state.reads[key] = id;
-    if (key.startsWith('t:')) state.threadUnread.delete(Number(key.slice(2)));
-    else state.unread[key] = { count: 0, mentions: 0 };
+    const u = unread || { count: 0, mentions: 0 };
+    if (key.startsWith('t:')) { if (u.count) state.threadUnread.add(Number(key.slice(2))); else state.threadUnread.delete(Number(key.slice(2))); }
+    else state.unread[key] = u;
     bus.emit('read', key);
   },
   prefs({ channel, pref }) { state.prefs[channel] = pref; bus.emit('prefs'); },

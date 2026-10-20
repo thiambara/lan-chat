@@ -157,4 +157,14 @@ M.unreadFor = user => {
   return { unread, threads };
 };
 
+// Non-lus d'une seule conversation (ou d'un fil, clé "t:<id>"), après un changement de « lu »
+M.unreadOne = (user, key) => {
+  const last = M.readOf(user, key);
+  const thread = /^t:(\d+)$/.exec(key);
+  const list = thread ? M.replies.get(Number(thread[1])) || [] : M.messages.filter(m => m.channel === key && (!m.parent || m.broadcast));
+  const u = { count: 0, mentions: 0 };
+  for (const m of list) if (m.id > last && m.user !== user) { u.count++; if (M.mentions(m, user)) u.mentions++; }
+  return u;
+};
+
 module.exports = M;
